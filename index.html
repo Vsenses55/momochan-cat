@@ -1,0 +1,831 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="A sitting cat cut into steel plates in Three.js. Orbit it and hover the plates to play notes and wake translucent color.">
+<title>Sliced Cat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700&family=Schibsted+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; font-size: 14px; }
+/* Layout: full-bleed WebGL plaza, quiet HUD pinned to top and bottom edges like a gallery placard */
+:root {
+  --bg: #faf5eb;          /* warm paper */
+  --teal: #6aac99;
+  --plum: #532376;
+  --coral: #eb5f50;
+  --ink: #2a1f33;
+  --muted: #6e6474;
+  --panel: rgba(250, 245, 235, 0.78);
+  --rule: rgba(83, 35, 118, 0.16);
+  --glint: #c79a5b;       /* late-sun reflection on steel */
+  --f-display: "Big Shoulders Display", "Arial Narrow", sans-serif;
+  --f-body: "Schibsted Grotesk", system-ui, -apple-system, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-body);
+  overflow: hidden;
+}
+#stage { position: fixed; inset: 0; }
+#stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+.hud {
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: calc(16px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-bottom, 0px));
+  pointer-events: none;
+}
+.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.placard { max-width: 34ch; min-width: 0; }
+.placard h1 {
+  margin: 0; font-family: var(--f-display); font-weight: 700;
+  font-size: clamp(34px, 6vw, 56px); line-height: 0.9; letter-spacing: 0.01em;
+  text-transform: uppercase; text-wrap: balance;
+}
+.placard .meta {
+  margin: 10px 0 0; font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--muted);
+}
+.placard p { margin: 8px 0 0; font-size: 14px; line-height: 1.45; color: var(--muted); }
+
+button, .chip, input { pointer-events: auto; font: inherit; }
+.sound {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-radius: 999px; border: 1px solid var(--rule);
+  background: var(--panel); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  color: var(--ink); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
+}
+.sound .bars { display: inline-flex; gap: 2px; align-items: flex-end; height: 12px; }
+.sound .bars i { width: 2px; background: currentColor; height: 4px; border-radius: 1px; transition: height .2s; }
+.sound[aria-pressed="true"] .bars i:nth-child(1) { height: 7px; }
+.sound[aria-pressed="true"] .bars i:nth-child(2) { height: 12px; }
+.sound[aria-pressed="true"] .bars i:nth-child(3) { height: 9px; }
+.sound[aria-pressed="true"] .bars i:nth-child(4) { height: 5px; }
+
+.bottom { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: center; gap: 12px; }
+.vol { display: flex; align-items: center; gap: 8px; pointer-events: auto; }
+.vol input[type="range"] { width: 110px; }
+.controls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px 18px;
+  padding: 10px 14px; border-radius: 14px; border: 1px solid var(--rule);
+  background: var(--panel); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  pointer-events: auto;
+}
+.group { display: flex; align-items: center; gap: 8px; }
+.label { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.chips { display: inline-flex; border: 1px solid var(--rule); border-radius: 999px; padding: 2px; }
+.chip {
+  border: 0; background: transparent; color: var(--ink); cursor: pointer;
+  padding: 5px 11px; border-radius: 999px; font-size: 13px;
+}
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+input[type="range"] { width: 120px; accent-color: var(--ink); }
+.val { font-family: var(--f-mono); font-size: 12px; font-variant-numeric: tabular-nums; min-width: 2ch; }
+.toggle {
+  border: 1px solid var(--rule); background: transparent; color: var(--ink); cursor: pointer;
+  padding: 5px 12px; border-radius: 999px; font-size: 13px;
+}
+.toggle[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--glint); outline-offset: 2px; }
+
+.side { display: flex; flex-direction: column; align-items: flex-end; gap: 14px; }
+.readout {
+  font-family: var(--f-mono); font-size: 12px; font-variant-numeric: tabular-nums;
+  color: var(--muted); text-align: right; line-height: 1.6;
+}
+.readout b { color: var(--ink); font-weight: 500; }
+.readout .big { font-family: var(--f-display); font-size: 40px; line-height: 1; color: var(--ink); font-weight: 500; letter-spacing: 0.02em; }
+
+#status {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  font-family: var(--f-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+  pointer-events: none;
+}
+
+@media (max-width: 560px) {
+  .placard p { display: none; }
+  .readout .big { font-size: 30px; }
+  input[type="range"] { width: 96px; }
+}
+</style>
+
+</head>
+<body>
+<div id="stage"></div>
+<div id="status">Cutting plates…</div>
+
+<div class="hud">
+  <div class="top">
+    <div class="placard">
+      <div class="meta"><span id="metaCount">44</span> plates · <span id="figCut">cut side to side</span></div>
+      <p>Drag to orbit. Run the cursor across the plates to strike them. Turn it nose-on and the cat dissolves into lines.</p>
+    </div>
+    <div class="side">
+    <button class="sound" id="sound" aria-pressed="false" type="button">
+      <span class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <span id="soundLabel">Sound off</span>
+    </button>
+      <div class="vol">
+        <label class="label" for="volume">Volume</label>
+        <input type="range" id="volume" min="0" max="100" step="1" value="35">
+        <span class="val" id="volVal">35</span>
+      </div>
+      <div class="readout" aria-live="polite">
+        <div class="big" id="rNote">—</div>
+        <div>plate <b id="rIdx">––</b> / <span id="rTotal">56</span> · x <b id="rX">+0.000</b> m</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom">
+    <div class="controls">
+      <div class="group">
+        <span class="label">Rest</span>
+        <div class="chips" role="group" aria-label="Resting finish">
+          <button class="chip" type="button" data-rest="glass" aria-pressed="false">Glass</button>
+          <button class="chip" type="button" data-rest="steel" aria-pressed="true">Steel</button>
+        </div>
+      </div>
+      <div class="group">
+        <span class="label">Color</span>
+        <div class="chips" role="group" aria-label="Plate color">
+          <button class="chip" type="button" data-color="gradient" aria-pressed="true">Gradient</button>
+          <button class="chip" type="button" data-color="bands" aria-pressed="false">Bands</button>
+          <button class="chip" type="button" data-color="prism" aria-pressed="false">Prism</button>
+        </div>
+      </div>
+      <div class="group">
+        <span class="label">Motion</span>
+        <div class="chips" role="group" aria-label="Hover motion">
+          <button class="chip" type="button" data-mode="ripple" aria-pressed="false">Ripple</button>
+          <button class="chip" type="button" data-mode="slide" aria-pressed="false">Slide</button>
+          <button class="chip" type="button" data-mode="tilt" aria-pressed="true">Tilt</button>
+        </div>
+      </div>
+      <div class="group">
+        <label class="label" for="count">Plates</label>
+        <input type="range" id="count" min="24" max="96" step="4" value="44">
+        <span class="val" id="countVal">44</span>
+      </div>
+      <button class="toggle" id="explode" type="button" aria-pressed="false">Explode</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(() => {
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const css = getComputedStyle(document.documentElement);
+  const GLINT = new THREE.Color(css.getPropertyValue('--glint').trim() || '#c79a5b');
+
+  /* ---------- Figure as a signed distance field (y up, z forward, x across) ---------- */
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  function cap(px, py, pz, a, b, ra, rb) {
+    const bx = b[0]-a[0], by = b[1]-a[1], bz = b[2]-a[2];
+    const qx = px-a[0], qy = py-a[1], qz = pz-a[2];
+    const h = clamp((qx*bx+qy*by+qz*bz)/(bx*bx+by*by+bz*bz), 0, 1);
+    const dx = qx-bx*h, dy = qy-by*h, dz = qz-bz*h;
+    return Math.sqrt(dx*dx+dy*dy+dz*dz) - (ra + (rb-ra)*h);
+  }
+  function ell(px, py, pz, c, r) {
+    const x = px-c[0], y = py-c[1], z = pz-c[2];
+    const k0 = Math.sqrt((x/r[0])**2 + (y/r[1])**2 + (z/r[2])**2);
+    const k1 = Math.sqrt((x/(r[0]*r[0]))**2 + (y/(r[1]*r[1]))**2 + (z/(r[2]*r[2]))**2);
+    return k1 === 0 ? -Math.min(r[0], r[1], r[2]) : k0*(k0-1)/k1;
+  }
+  function smin(a, b, k) { const h = Math.max(k-Math.abs(a-b), 0)/k; return Math.min(a, b) - h*h*k*0.25; }
+
+  // A seated, cross-legged figure with hands resting on the knees.
+  function seated(x, y, z) {
+    let d = ell(x,y,z,[0,0.30,-0.02],[0.30,0.17,0.22]);                       // pelvis
+    d = smin(d, cap(x,y,z,[0,0.36,-0.03],[0,0.72,-0.01],0.19,0.155), 0.10);    // abdomen
+    d = smin(d, ell(x,y,z,[0,0.86,0.0],[0.235,0.20,0.15]), 0.08);              // chest
+    d = smin(d, cap(x,y,z,[-0.2,1.0,-0.02],[0.2,1.0,-0.02],0.075,0.075), 0.06); // shoulders
+    d = smin(d, cap(x,y,z,[0,1.0,-0.01],[0,1.17,0.012],0.06,0.052), 0.05);     // neck
+    d = smin(d, ell(x,y,z,[0,1.31,0.025],[0.098,0.135,0.118]), 0.04);          // head
+    for (const s of [-1, 1]) {
+      d = smin(d, cap(x,y,z,[s*0.25,0.98,-0.02],[s*0.31,0.70,0.06],0.058,0.047), 0.04);
+      d = smin(d, cap(x,y,z,[s*0.31,0.70,0.06],[s*0.42,0.38,0.32],0.046,0.034), 0.03);
+      d = smin(d, ell(x,y,z,[s*0.44,0.33,0.38],[0.042,0.03,0.07]), 0.03);
+      d = smin(d, cap(x,y,z,[s*0.14,0.24,0.02],[s*0.56,0.15,0.40],0.115,0.075), 0.08); // thigh
+    }
+    d = smin(d, cap(x,y,z,[0.56,0.13,0.42],[-0.18,0.088,0.58],0.07,0.046), 0.05);  // right shin
+    d = smin(d, ell(x,y,z,[-0.27,0.08,0.565],[0.11,0.038,0.048]), 0.03);
+    d = smin(d, cap(x,y,z,[-0.56,0.12,0.40],[0.16,0.072,0.70],0.07,0.044), 0.05);  // left shin
+    d = smin(d, ell(x,y,z,[0.25,0.065,0.705],[0.11,0.034,0.046]), 0.03);
+    return Math.max(d, 0.004 - y); // flat underside on the plinth
+  }
+
+  // Standing in contrapposto, arms raised into a ring overhead (figure faces +z, x across).
+  function reachingBody(x, y, z) {
+    let d = ell(x,y,z,[0,0.98,0],[0.17,0.12,0.11]);                            // pelvis
+    d = smin(d, cap(x,y,z,[0,1.02,0],[0,1.32,0.01],0.13,0.12), 0.08);          // abdomen
+    d = smin(d, ell(x,y,z,[0,1.42,0.01],[0.17,0.15,0.11]), 0.07);              // chest
+    d = smin(d, cap(x,y,z,[-0.17,1.55,0],[0.17,1.55,0],0.055,0.055), 0.05);   // shoulders
+    d = smin(d, cap(x,y,z,[0,1.55,0],[0,1.67,0.012],0.046,0.042), 0.04);       // neck
+    d = smin(d, ell(x,y,z,[0,1.79,0.02],[0.08,0.108,0.095]), 0.03);            // head
+    for (const s of [-1, 1]) {
+      d = smin(d, cap(x,y,z,[s*0.18,1.57,0],[s*0.27,1.88,0.01],0.046,0.037), 0.035); // upper arm
+      d = smin(d, cap(x,y,z,[s*0.27,1.88,0.01],[s*0.075,2.13,0.02],0.035,0.027), 0.025); // forearm
+      d = smin(d, ell(x,y,z,[s*0.035,2.19,0.02],[0.028,0.065,0.022]), 0.02);   // hands meet
+    }
+    // weight leg (-x) straight, free leg (+x) relaxed with bent knee
+    d = smin(d, cap(x,y,z,[-0.085,0.95,0],[-0.08,0.51,0.012],0.092,0.06), 0.06);
+    d = smin(d, cap(x,y,z,[-0.08,0.51,0.012],[-0.075,0.075,-0.01],0.056,0.036), 0.04);
+    d = smin(d, ell(x,y,z,[-0.075,0.035,0.055],[0.04,0.035,0.105]), 0.03);
+    d = smin(d, cap(x,y,z,[0.085,0.94,0],[0.13,0.52,0.07],0.088,0.058), 0.06);
+    d = smin(d, cap(x,y,z,[0.13,0.52,0.07],[0.12,0.09,0.0],0.054,0.035), 0.04);
+    d = smin(d, ell(x,y,z,[0.135,0.04,0.065],[0.04,0.035,0.1]), 0.03);
+    return Math.max(d, 0.004 - y);
+  }
+  // Cut front to back: the slicing axis is the body's depth.
+  const reaching = (a, y, b) => reachingBody(b, y, a);
+
+  // A large head and shoulders, cut side to side like a contour map of a profile.
+  function head(x, y, z) {
+    let d = ell(x,y,z,[0,1.0,0],[0.34,0.44,0.42]);                              // cranium
+    d = smin(d, ell(x,y,z,[0,0.78,0.12],[0.27,0.32,0.3]), 0.12);                // face and jaw
+    d = smin(d, ell(x,y,z,[0,1.03,0.33],[0.26,0.055,0.08]), 0.06);              // brow
+    d = smin(d, cap(x,y,z,[0,0.95,0.41],[0,0.81,0.48],0.024,0.052), 0.04);      // nose
+    d = smin(d, ell(x,y,z,[0,0.68,0.39],[0.09,0.03,0.04]), 0.03);               // lips
+    d = smin(d, ell(x,y,z,[0,0.56,0.3],[0.12,0.08,0.1]), 0.06);                 // chin
+    for (const s of [-1, 1]) {
+      d = smin(d, ell(x,y,z,[s*0.34,0.88,-0.02],[0.05,0.11,0.07]), 0.04);      // ears
+      const ex = x-s*0.13, ey = y-0.93, ez = z-0.40;
+      d = Math.max(d, -(Math.sqrt(ex*ex+ey*ey+ez*ez) - 0.062));                 // eye sockets
+    }
+    d = smin(d, cap(x,y,z,[0,0.62,-0.05],[0,0.12,-0.04],0.19,0.2), 0.08);       // neck
+    d = smin(d, ell(x,y,z,[0,0.1,-0.05],[0.62,0.16,0.28]), 0.12);               // shoulders
+    return Math.max(d, 0.004 - y);
+  }
+
+  // A sitting cat in profile, facing +z, about 1.5 m to the ear tips. Width runs along x.
+  const TAIL = [[-0.525,0.084],[-0.714,0.242],[-0.777,0.47],[-0.70,0.66],[-0.745,0.756],[-0.835,0.815]];
+  function cat(x, y, z) {
+    let d = ell(x,y,z,[0,0.39,-0.27],[0.285,0.39,0.3]);                         // haunch
+    d = smin(d, ell(x,y,z,[0,0.13,-0.24],[0.26,0.14,0.31]), 0.12);               // seat
+    d = smin(d, ell(x,y,z,[0,0.42,-0.03],[0.235,0.28,0.28]), 0.2);               // belly
+    d = smin(d, ell(x,y,z,[0,0.72,0.2],[0.205,0.3,0.24]), 0.24);                 // chest and shoulders
+    // Thick neck with a near-vertical nape; the throat curves in under the jaw.
+    d = smin(d, cap(x,y,z,[0,0.84,0.07],[0,1.13,0.19],0.2,0.17), 0.12);           // neck
+    d = smin(d, ell(x,y,z,[0,1.09,0.1],[0.17,0.16,0.13]), 0.1);                  // nape, full and rounded
+    d = smin(d, ell(x,y,z,[0,1.22,0.26],[0.215,0.13,0.17]), 0.12);               // cranium
+    d = smin(d, ell(x,y,z,[0,1.255,0.355],[0.17,0.07,0.075]), 0.05);             // forehead and brow
+    d = smin(d, ell(x,y,z,[0,1.1,0.33],[0.16,0.08,0.13]), 0.08);                 // jaw
+    d = smin(d, ell(x,y,z,[0,1.15,0.44],[0.09,0.052,0.065]), 0.035);             // muzzle, set below the stop
+    d = smin(d, ell(x,y,z,[0,1.168,0.49],[0.034,0.026,0.024]), 0.015);           // nose tip, slightly upturned
+    d = smin(d, ell(x,y,z,[0,1.073,0.43],[0.07,0.038,0.055]), 0.03);             // chin
+    d = Math.max(d, -cap(x,y,z,[-0.06,1.113,0.506],[0.06,1.113,0.506],0.017,0.017)); // mouth line
+    for (const s of [-1, 1]) {
+      d = smin(d, ell(x,y,z,[s*0.1,1.1,0.32],[0.12,0.1,0.13]), 0.1);             // cheeks
+      d = smin(d, cap(x,y,z,[s*0.13,1.27,0.24],[s*0.175,1.47,0.265],0.07,0.008), 0.035); // ears, set wide and tipped out
+    }
+    for (const s of [-1, 1]) {
+      d = smin(d, cap(x,y,z,[s*0.065,0.62,0.15+(s>0?0.05:0)],[s*0.065,0.06,0.17+(s>0?0.05:0)],0.06,0.045), 0.04); // front legs
+      d = smin(d, ell(x,y,z,[s*0.065,0.035,0.26],[0.045,0.035,0.075]), 0.03);  // front paws
+      d = smin(d, cap(x,y,z,[s*0.17,0.16,-0.17],[s*0.17,0.04,0.0],0.07,0.042), 0.06); // hind feet
+      d = smin(d, ell(x,y,z,[s*0.17,0.03,0.0],[0.05,0.035,0.1]), 0.04);        // hind paws
+    }
+    for (let k = 0; k < TAIL.length-1; k++) {
+      const a = TAIL[k], b = TAIL[k+1], t0 = k/(TAIL.length-1), t1 = (k+1)/(TAIL.length-1);
+      // centered on the spine, drifting only slightly to one side toward the tip
+      d = smin(d, cap(x,y,z,[-0.05*t0,a[1],a[0]],[-0.05*t1,b[1],b[0]],0.054-0.014*t0,0.054-0.014*t1), k === 0 ? 0.08 : 0.025);
+    }
+    return Math.max(d, 0.004 - y);
+  }
+
+  // Each silhouette: its field, the slicing range (world x), the section window (world z, y) and framing.
+  const FIGS = {
+    cat: {
+      name: 'Sliced Cat', cut: 'cut side to side', sdf: cat, plates: 44,
+      x0: -0.29, x1: 0.29, grid: { z0: -0.92, z1: 0.6, y0: -0.02, y1: 1.54 },
+      cam: [3.3, 1.25, 1.5], target: [0, 0.72, -0.15], plinth: 0.98, plinthZ: -0.18, spread: 2.5,
+    },
+    reaching: {
+      name: 'Reaching', cut: 'cut front to back', sdf: reaching, plates: 28,
+      x0: -0.115, x1: 0.16, grid: { z0: -0.4, z1: 0.4, y0: -0.02, y1: 2.32 },
+      cam: [3.1, 1.6, 3.6], target: [0, 1.12, 0], plinth: 0.62, spread: 3.2,
+    },
+    head: {
+      name: 'Head', cut: 'cut side to side', sdf: head, plates: 48,
+      x0: -0.6, x1: 0.6, grid: { z0: -0.5, z1: 0.64, y0: -0.02, y1: 1.5 },
+      cam: [2.7, 1.25, 2.6], target: [0, 0.74, 0.05], plinth: 0.85, spread: 1.0,
+    },
+    seated: {
+      name: 'Seated', cut: 'cut side to side', sdf: seated, plates: 56,
+      x0: -0.67, x1: 0.67, grid: { z0: -0.34, z1: 0.86, y0: -0.02, y1: 1.5 },
+      cam: [2.6, 1.55, 3.4], target: [0, 0.62, 0.2], plinth: 1.15, spread: 1.1,
+    },
+  };
+  let fig = FIGS.cat, figure = fig.sdf;
+
+  /* ---------- Marching squares: one slice plane -> closed outlines ---------- */
+  let GRID, NZ, NY;
+  function setGrid(g) {
+    GRID = Object.assign({ step: 0.0105 }, g);
+    NZ = Math.ceil((GRID.z1-GRID.z0)/GRID.step)+1;
+    NY = Math.ceil((GRID.y1-GRID.y0)/GRID.step)+1;
+  }
+  setGrid(fig.grid);
+
+  function sampleSlice(x) {
+    const f = new Float32Array(NZ*NY);
+    for (let j = 0; j < NY; j++) {
+      const y = GRID.y0 + j*GRID.step;
+      for (let i = 0; i < NZ; i++) {
+        const edge = i === 0 || j === 0 || i === NZ-1 || j === NY-1;
+        f[j*NZ+i] = edge ? 1 : figure(x, y, GRID.z0 + i*GRID.step);
+      }
+    }
+    return f;
+  }
+
+  function contours(f) {
+    const pts = new Map(), adj = new Map();
+    const v = (i, j) => f[j*NZ+i];
+    function edgePoint(key, i0, j0, i1, j1) {
+      if (!pts.has(key)) {
+        const a = v(i0,j0), b = v(i1,j1), t = a/(a-b);
+        pts.set(key, [GRID.z0 + (i0 + (i1-i0)*t)*GRID.step, GRID.y0 + (j0 + (j1-j0)*t)*GRID.step]);
+      }
+      return key;
+    }
+    function link(a, b) {
+      if (!adj.has(a)) adj.set(a, []); if (!adj.has(b)) adj.set(b, []);
+      adj.get(a).push(b); adj.get(b).push(a);
+    }
+    for (let j = 0; j < NY-1; j++) for (let i = 0; i < NZ-1; i++) {
+      const a = v(i,j) < 0, b = v(i+1,j) < 0, c = v(i+1,j+1) < 0, d = v(i,j+1) < 0;
+      const cs = (a?1:0)|(b?2:0)|(c?4:0)|(d?8:0);
+      if (cs === 0 || cs === 15) continue;
+      const E = [
+        () => edgePoint(`h${i},${j}`, i,j, i+1,j),
+        () => edgePoint(`v${i+1},${j}`, i+1,j, i+1,j+1),
+        () => edgePoint(`h${i},${j+1}`, i,j+1, i+1,j+1),
+        () => edgePoint(`v${i},${j}`, i,j, i,j+1),
+      ];
+      const centerIn = (v(i,j)+v(i+1,j)+v(i+1,j+1)+v(i,j+1)) < 0;
+      const segs = {
+        1:[[3,0]], 2:[[0,1]], 3:[[3,1]], 4:[[1,2]], 6:[[0,2]], 7:[[3,2]],
+        8:[[2,3]], 9:[[0,2]], 11:[[1,2]], 12:[[1,3]], 13:[[0,1]], 14:[[0,3]],
+        5: centerIn ? [[0,1],[2,3]] : [[3,0],[1,2]],
+        10: centerIn ? [[3,0],[1,2]] : [[0,1],[2,3]],
+      }[cs];
+      for (const [p, q] of segs) link(E[p](), E[q]());
+    }
+    const seen = new Set(), loops = [];
+    for (const start of adj.keys()) {
+      if (seen.has(start)) continue;
+      const loop = []; let prev = null, cur = start;
+      while (cur && !seen.has(cur)) {
+        seen.add(cur); loop.push(pts.get(cur));
+        const n = adj.get(cur); const next = n[0] !== prev ? n[0] : n[1];
+        prev = cur; cur = next;
+      }
+      if (loop.length > 8) loops.push(loop);
+    }
+    return loops;
+  }
+
+  function area(l) { let s = 0; for (let k = 0; k < l.length; k++) { const a = l[k], b = l[(k+1)%l.length]; s += a[0]*b[1]-b[0]*a[1]; } return s/2; }
+  function inside(p, l) {
+    let c = false;
+    for (let k = 0, m = l.length-1; k < l.length; m = k++) {
+      const a = l[k], b = l[m];
+      if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1]) + a[0]) c = !c;
+    }
+    return c;
+  }
+  function smooth(l) { // thin to every other point, then one Chaikin pass
+    const t = l.filter((_, k) => k % 2 === 0), out = [];
+    for (let k = 0; k < t.length; k++) {
+      const a = t[k], b = t[(k+1)%t.length];
+      out.push([a[0]*0.75+b[0]*0.25, a[1]*0.75+b[1]*0.25], [a[0]*0.25+b[0]*0.75, a[1]*0.25+b[1]*0.75]);
+    }
+    return out;
+  }
+  function toShapes(loops) {
+    const items = loops.map(l => ({ l: smooth(l), a: Math.abs(area(l)) })).filter(o => o.a > 2e-4).sort((p, q) => q.a - p.a);
+    const outers = [];
+    for (const it of items) {
+      const host = outers.find(o => inside(it.l[0], o.l));
+      if (host) host.holes.push(it.l); else outers.push({ l: it.l, holes: [] });
+    }
+    return outers.map(o => {
+      const s = new THREE.Shape(o.l.map(p => new THREE.Vector2(p[0], p[1])));
+      for (const h of o.holes) s.holes.push(new THREE.Path(h.map(p => new THREE.Vector2(p[0], p[1]))));
+      return s;
+    });
+  }
+
+  /* ---------- Scene ---------- */
+  const stage = document.getElementById('stage');
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.setClearColor(0x000000, 0);
+  stage.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(32, 1, 0.05, 50);
+  camera.position.set(2.6, 1.55, 3.4);
+
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 0.62, 0.2);
+  controls.enableDamping = true; controls.dampingFactor = 0.08;
+  controls.minDistance = 1.6; controls.maxDistance = 7;
+  controls.maxPolarAngle = Math.PI * 0.53;
+  controls.enablePan = false;
+  controls.autoRotate = !reduceMotion; controls.autoRotateSpeed = 0.55;
+  let idleTimer;
+  controls.addEventListener('start', () => { controls.autoRotate = false; clearTimeout(idleTimer); });
+  controls.addEventListener('end', () => { if (!reduceMotion) idleTimer = setTimeout(() => controls.autoRotate = true, 6000); });
+
+  // Studio environment built in-scene: soft sky dome plus a few light panels for steel reflections.
+  (function buildEnv() {
+    const env = new THREE.Scene();
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16),
+      new THREE.MeshBasicMaterial({ side: THREE.BackSide, vertexColors: true }));
+    const pos = dome.geometry.attributes.position, cols = [];
+    const top = new THREE.Color('#e9eef2'), mid = new THREE.Color('#a7b0b4'), low = new THREE.Color('#4a4f52');
+    for (let k = 0; k < pos.count; k++) {
+      const t = pos.getY(k)/10; const c = t > 0 ? mid.clone().lerp(top, t) : mid.clone().lerp(low, -t*1.6);
+      cols.push(c.r, c.g, c.b);
+    }
+    dome.geometry.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+    env.add(dome);
+    const panel = (w, h, p, c, i) => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(i), side: THREE.DoubleSide }));
+      m.position.set(...p); m.lookAt(0, 0, 0); env.add(m);
+    };
+    panel(6, 2.2, [0, 6, 2], '#ffffff', 3.2);
+    panel(2.5, 5, [-7, 2, -2], '#ffffff', 2.0);
+    panel(1.6, 4, [6, 1.5, 3], '#ffd9a8', 2.6);   // warm sun strip
+    const pm = new THREE.PMREMGenerator(renderer);
+    scene.environment = pm.fromScene(env, 0.02).texture;
+  })();
+
+  const sun = new THREE.DirectionalLight(0xfff1de, 1.6);
+  sun.position.set(2.5, 4.5, 2.2);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  Object.assign(sun.shadow.camera, { left: -1.6, right: 1.6, top: 2.6, bottom: -1.2, near: 0.5, far: 12 });
+  sun.shadow.bias = -0.0004; sun.shadow.radius = 4;
+  scene.add(sun);
+  scene.add(new THREE.HemisphereLight(0xeef3f5, 0x6d7275, 0.35));
+
+  // No plinth: an invisible ground that only catches the cat's shadow.
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(14, 14),
+    new THREE.ShadowMaterial({ color: 0x1d2124, opacity: 0.2 }));
+  ground.rotation.x = -Math.PI/2; ground.receiveShadow = true;
+  scene.add(ground);
+
+  /* ---------- Hover color treatments: steel at rest, translucent three-color glass while hovered ---------- */
+  const lin = v => new THREE.Color(css.getPropertyValue(v).trim()).convertSRGBToLinear();
+  const SHARED = {
+    uColA: { value: lin('--teal') }, uColB: { value: lin('--plum') }, uColC: { value: lin('--coral') },
+    uMode: { value: 0 }, uY0: { value: 0 }, uY1: { value: 1.5 }, uIdle: { value: 0 },
+  };
+  const MODES = { gradient: 0, bands: 1, prism: 2 };
+  let colorMode = 'gradient';
+
+  // Patches the standard material: blends steel toward a glassy, rim-lit gradient as uTint rises.
+  function glassify(mat) {
+    mat.transparent = true;
+    mat.userData.uTint = { value: 0 };
+    mat.userData.uPhase = { value: 0 };
+    mat.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, SHARED, { uTint: mat.userData.uTint, uPhase: mat.userData.uPhase });
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', `#include <common>
+          varying vec3 vWPos;
+          uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC;
+          uniform float uMode, uY0, uY1, uTint, uPhase, uIdle;
+          vec3 ramp(float t) { t = clamp(t, 0.0, 1.0); return t < 0.5 ? mix(uColA, uColB, t * 2.0) : mix(uColB, uColC, t * 2.0 - 1.0); }`)
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+          {
+            float h = clamp((vWPos.y - uY0) / (uY1 - uY0), 0.0, 1.0);
+            float rim = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 2.2);
+            float t;
+            if (uMode < 0.5)      t = 0.12 + h * 0.62 + (uPhase - 0.5) * 0.5;
+            else if (uMode < 1.5) t = uPhase + (h - 0.5) * 0.22;
+            else                  t = 0.12 + rim * 1.1 + h * 0.4;
+            // Resting glass: clear and faintly cool, with edges that catch the light.
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.55, 0.63, 0.68), uIdle);
+            diffuseColor.a = mix(diffuseColor.a, 0.12 + 0.72 * rim, uIdle);
+            metalnessFactor = mix(metalnessFactor, 0.05, uIdle);
+            roughnessFactor = mix(roughnessFactor, 0.04, uIdle);
+            totalEmissiveRadiance += vec3(0.9, 0.95, 1.0) * 0.04 * rim * uIdle;
+            vec3 glass = ramp(t);
+            glass = mix(glass, mix(uColC, vec3(1.0), 0.25), rim * 0.3);     // warm edge
+            diffuseColor.rgb = mix(diffuseColor.rgb, glass, uTint);
+            diffuseColor.a = mix(diffuseColor.a, 0.66 + 0.3 * rim, uTint);
+            metalnessFactor = mix(metalnessFactor, 0.0, uTint);
+            roughnessFactor = mix(roughnessFactor, 0.12, uTint);
+            totalEmissiveRadiance += glass * (0.1 + 0.4 * rim) * uTint;      // light seems to pass through
+          }`);
+    };
+    mat.customProgramCacheKey = () => 'glass-plate';
+  }
+
+  function applyColors() {
+    SHARED.uMode.value = MODES[colorMode];
+    SHARED.uY0.value = GRID.y0; SHARED.uY1.value = GRID.y1;
+    const N = slices.length;
+    for (const s of slices) {
+      const t = s.idx/Math.max(N-1, 1);
+      s.mesh.material.userData.uPhase.value = colorMode === 'bands' ? (Math.floor(s.idx/2) % 3)*0.5 : t;
+    }
+  }
+  function fitPlinth() {}
+
+  /* ---------- Slice construction ---------- */
+  let X0 = fig.x0, X1 = fig.x1;
+  const sculpture = new THREE.Group(); scene.add(sculpture);
+  let slices = [], spacing = 0;
+
+  function disposeSlices() {
+    for (const s of slices) {
+      s.mesh.geometry.dispose(); s.mesh.material.dispose();
+      s.mesh.children.forEach(c => c.geometry.dispose());
+      sculpture.remove(s.mesh);
+    }
+    slices = [];
+  }
+
+  function build(N) {
+    disposeSlices();
+    spacing = (X1 - X0)/(N - 1);
+    const thick = Math.min(0.0095, spacing*0.42);
+    const fields = [];
+    for (let k = 0; k < N; k++) fields.push(sampleSlice(X0 + k*spacing));
+
+    const pinMat = new THREE.MeshStandardMaterial({ color: 0xd4d7d8, metalness: 1, roughness: 0.3 });
+    for (let k = 0; k < N; k++) {
+      const x = X0 + k*spacing;
+      const shapes = toShapes(contours(fields[k]));
+      if (!shapes.length) continue;
+      const geo = new THREE.ExtrudeGeometry(shapes, {
+        depth: thick, bevelEnabled: true, bevelThickness: 0.0012, bevelSize: 0.0012, bevelSegments: 1, curveSegments: 1,
+      });
+      geo.rotateY(-Math.PI/2);         // extrusion now runs along world x
+      geo.translate(thick/2, 0, 0);
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0xc9ccce, metalness: 1, roughness: 0.22 + 0.06*Math.sin(k*1.7), envMapIntensity: 1.15,
+        emissive: 0x000000, emissiveIntensity: 1,
+      });
+      glassify(mat);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      mesh.position.x = x;
+      const s = { mesh, x, idx: slices.length, y: 0, vy: 0, z: 0, vz: 0, r: 0, vr: 0, glow: 0, tint: 0, heat: 0 };
+      mesh.userData.slice = s;
+
+      // Spacer pins to the next plate, as in the welded originals.
+      if (k < N-1) {
+        const f0 = fields[k], f1 = fields[k+1], gap = spacing - thick;
+        const pinGeo = new THREE.BoxGeometry(gap, 0.024, 0.006);
+        let placed = 0, tries = 0;
+        const H = GRID.y1 - GRID.y0;
+        const bands = [0.1, 0.3, 0.53, 0.77].map(f => GRID.y0 + f*H);
+        while (placed < 3 && tries < 160) {
+          tries++;
+          const i = 2 + Math.floor(Math.random()*(NZ-4));
+          const j = 2 + Math.floor(Math.random()*(NY-4));
+          const id = j*NZ+i;
+          if (f0[id] < -0.018 && f1[id] < -0.018) {
+            const yy = GRID.y0 + j*GRID.step;
+            if (placed < bands.length && Math.abs(yy - bands[placed]) > H*0.2 && tries < 120) continue;
+            const pin = new THREE.Mesh(pinGeo, pinMat);
+            pin.position.set(spacing/2, yy, GRID.z0 + i*GRID.step);
+            pin.castShadow = true;
+            mesh.add(pin); placed++;
+          }
+        }
+      }
+      sculpture.add(mesh);
+      slices.push(s);
+    }
+    document.getElementById('rTotal').textContent = slices.length; applyColors();
+    document.getElementById('metaCount').textContent = slices.length;
+  }
+
+  /* ---------- Sound: struck steel bar through a short plaza reverb ---------- */
+  let audio = null, lastStrike = 0;
+  const SCALE = [0, 2, 4, 7, 9]; // major pentatonic
+  const NAMES = ['C','C♯','D','E♭','E','F','F♯','G','A♭','A','B♭','B'];
+  function noteFor(idx, total) {
+    const step = Math.round(idx/(Math.max(total-1, 1)) * 13);
+    const midi = 52 + Math.floor(step/5)*12 + SCALE[step % 5]; // from E3 upward
+    return { midi, name: NAMES[midi % 12] + (Math.floor(midi/12) - 1) };
+  }
+  function initAudio() {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const master = ctx.createGain(); master.gain.value = volumeGain();
+    const comp = ctx.createDynamicsCompressor();
+    const verb = ctx.createConvolver();
+    const len = Math.floor(ctx.sampleRate*2.6), ir = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      for (let n = 0; n < len; n++) d[n] = (Math.random()*2-1) * Math.pow(1 - n/len, 3.2);
+    }
+    verb.buffer = ir;
+    const wet = ctx.createGain(); wet.gain.value = 0.32;
+    master.connect(comp); master.connect(verb); verb.connect(wet); wet.connect(comp); comp.connect(ctx.destination);
+    return { ctx, master };
+  }
+  function strike(slice, hitY) {
+    if (!audio || audio.ctx.state !== 'running') return;
+    const now = audio.ctx.currentTime;
+    if (now - lastStrike < 0.028) return;
+    lastStrike = now;
+    const { midi } = noteFor(slice.idx, slices.length);
+    const f0 = 440 * Math.pow(2, (midi-69)/12);
+    const bright = clamp((hitY - GRID.y0)/(GRID.y1 - GRID.y0), 0, 1);       // higher on the figure rings brighter
+    const out = audio.ctx.createGain(); out.gain.value = 0.16;
+    let node = out;
+    if (audio.ctx.createStereoPanner) {
+      const p = audio.ctx.createStereoPanner(); p.pan.value = clamp(slice.idx/Math.max(slices.length-1, 1)*2-1, -1, 1)*0.75;
+      out.connect(p); node = p;
+    }
+    node.connect(audio.master);
+    const partials = [[1, 1, 2.4], [2.756, 0.45 + 0.3*bright, 1.3], [5.404, 0.18 + 0.25*bright, 0.6], [8.933, 0.08 + 0.15*bright, 0.3]];
+    for (const [ratio, amp, dec] of partials) {
+      const o = audio.ctx.createOscillator(), g = audio.ctx.createGain();
+      o.type = 'sine'; o.frequency.value = f0*ratio*(1 + (Math.random()-0.5)*0.002);
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(amp, now + 0.003);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + dec);
+      o.connect(g); g.connect(out); o.start(now); o.stop(now + dec + 0.05);
+    }
+  }
+  const soundBtn = document.getElementById('sound'), soundLabel = document.getElementById('soundLabel');
+  const volume = document.getElementById('volume'), volVal = document.getElementById('volVal');
+  function volumeGain() { const v = +volume.value/100; return v*v*1.6; }   // squared so the low end is fine-grained
+  volume.addEventListener('input', () => {
+    volVal.textContent = volume.value;
+    if (audio) audio.master.gain.setTargetAtTime(volumeGain(), audio.ctx.currentTime, 0.03);
+  });
+  soundBtn.addEventListener('click', async () => {
+    if (!audio) audio = initAudio();
+    const on = soundBtn.getAttribute('aria-pressed') !== 'true';
+    if (on) await audio.ctx.resume(); else await audio.ctx.suspend();
+    soundBtn.setAttribute('aria-pressed', String(on));
+    soundLabel.textContent = on ? 'Sound on' : 'Sound off';
+  });
+
+  /* ---------- Hover: raycast plates, spring them, ring them ---------- */
+  let mode = 'tilt', explode = 0, explodeTarget = 0;
+  const pending = [];
+  const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+  let hovered = null;
+  const rNote = document.getElementById('rNote'), rIdx = document.getElementById('rIdx'), rX = document.getElementById('rX');
+
+  function excite(s, now) {
+    const reach = mode === 'ripple' ? 5 : 3;
+    for (let d = -reach; d <= reach; d++) {
+      const t = slices[s.idx + d]; if (!t) continue;
+      const w = Math.exp(-(d*d)/(mode === 'ripple' ? 6 : 2.5));
+      pending.push({ at: now + Math.abs(d)*(mode === 'ripple' ? 0.045 : 0.02), s: t, w });
+    }
+  }
+  function applyImpulse(s, w) {
+    const k = reduceMotion ? 0.35 : 1;
+    if (mode === 'ripple') s.vy += 0.55*w*k;
+    else if (mode === 'slide') s.vz += 0.75*w*k;
+    else s.vr += -1.4*w*k;
+    s.glow = Math.max(s.glow, w);
+  }
+
+  function onPointer(e) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    ptr.set(((e.clientX-rect.left)/rect.width)*2-1, -((e.clientY-rect.top)/rect.height)*2+1);
+    ray.setFromCamera(ptr, camera);
+    const hit = ray.intersectObjects(slices.map(s => s.mesh), false)[0];
+    const s = hit ? hit.object.userData.slice : null;
+    renderer.domElement.style.cursor = s ? 'crosshair' : 'grab';
+    if (s && s !== hovered) {
+      excite(s, performance.now()/1000);
+      strike(s, hit.point.y);
+      const n = noteFor(s.idx, slices.length);
+      rNote.textContent = n.name;
+      rIdx.textContent = String(s.idx + 1).padStart(2, '0');
+      rX.textContent = (s.x >= 0 ? '+' : '−') + Math.abs(s.x).toFixed(3);
+    }
+    hovered = s;
+  }
+  renderer.domElement.addEventListener('pointermove', onPointer);
+  renderer.domElement.addEventListener('pointerdown', onPointer);
+  renderer.domElement.addEventListener('pointerleave', () => { hovered = null; });
+
+  document.querySelectorAll('.chip[data-rest]').forEach(b => b.addEventListener('click', () => {
+    SHARED.uIdle.value = b.dataset.rest === 'glass' ? 1 : 0;
+    document.querySelectorAll('.chip[data-rest]').forEach(c => c.setAttribute('aria-pressed', String(c === b)));
+  }));
+  document.querySelectorAll('.chip[data-color]').forEach(b => b.addEventListener('click', () => {
+    colorMode = b.dataset.color;
+    document.querySelectorAll('.chip[data-color]').forEach(c => c.setAttribute('aria-pressed', String(c === b)));
+    applyColors();
+  }));
+  document.querySelectorAll('.chip[data-mode]').forEach(b => b.addEventListener('click', () => {
+    mode = b.dataset.mode;
+    document.querySelectorAll('.chip[data-mode]').forEach(c => c.setAttribute('aria-pressed', String(c === b)));
+  }));
+  document.querySelectorAll('.chip[data-fig]').forEach(b => b.addEventListener('click', () => {
+    if (FIGS[b.dataset.fig] === fig) return;
+    document.querySelectorAll('.chip[data-fig]').forEach(c => c.setAttribute('aria-pressed', String(c === b)));
+    selectFigure(b.dataset.fig);
+  }));
+
+  function frame() {
+    controls.target.set(...fig.target);
+    camera.position.set(...fig.cam);
+    controls.maxDistance = 7;
+    controls.update();
+  }
+  function selectFigure(key) {
+    fig = FIGS[key]; figure = fig.sdf;
+    X0 = fig.x0; X1 = fig.x1; setGrid(fig.grid);
+    document.getElementById('figName').textContent = fig.name;
+    document.getElementById('figCut').textContent = fig.cut;
+    count.value = fig.plates; countVal.textContent = fig.plates;
+    fitPlinth(fig.plinth); frame();
+    rebuild(fig.plates);
+  }
+  const explodeBtn = document.getElementById('explode');
+  explodeBtn.addEventListener('click', () => {
+    explodeTarget = explodeTarget ? 0 : 1;
+    explodeBtn.setAttribute('aria-pressed', String(!!explodeTarget));
+  });
+  const count = document.getElementById('count'), countVal = document.getElementById('countVal');
+  count.addEventListener('input', () => countVal.textContent = count.value);
+  count.addEventListener('change', () => rebuild(+count.value));
+
+  const status = document.getElementById('status');
+  function rebuild(N) {
+    status.hidden = false; status.textContent = `Cutting ${N} plates…`;
+    setTimeout(() => { build(N); status.hidden = true; if (!reduceMotion) explode = 1; }, 30);
+  }
+
+  /* ---------- Loop ---------- */
+  function resize() {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w/h;
+    camera.fov = w < 600 ? 42 : 32;
+    camera.updateProjectionMatrix();
+  }
+  new ResizeObserver(resize).observe(stage); resize();
+
+  const clock = new THREE.Clock();
+  function tick() {
+    const dt = Math.min(clock.getDelta(), 1/30), now = performance.now()/1000;
+    for (let k = pending.length-1; k >= 0; k--) if (pending[k].at <= now) { applyImpulse(pending[k].s, pending[k].w); pending.splice(k, 1); }
+    explode += (explodeTarget - explode) * Math.min(1, dt*3.2);
+    if (hovered) for (let d = -4; d <= 4; d++) {
+      const t = slices[hovered.idx + d]; if (t) t.heat = Math.max(t.heat, Math.exp(-(d*d)/7));
+    }
+    const K = 70, C = 7;
+    for (const s of slices) {
+      s.vy += (-K*s.y - C*s.vy)*dt; s.y += s.vy*dt;
+      s.vz += (-K*s.z - C*s.vz)*dt; s.z += s.vz*dt;
+      s.vr += (-K*s.r - C*s.vr)*dt; s.r += s.vr*dt;
+      s.glow *= Math.exp(-dt*2.6);
+      s.mesh.position.set(s.x*(1 + explode*fig.spread), s.y, s.z);
+      s.mesh.rotation.x = s.r*0.12;
+      // Color eases in quickly on hover and fades out slowly once the cursor moves on.
+      const target = Math.max(s.heat, s.glow*0.6);
+      s.tint += (target - s.tint) * Math.min(1, dt*(target > s.tint ? 12 : 1.6));
+      s.heat = 0;
+      s.mesh.material.userData.uTint.value = s.tint;
+    }
+    controls.update();
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+
+  fitPlinth(fig.plinth); frame();
+  setTimeout(() => { build(fig.plates); status.hidden = true; if (!reduceMotion) explode = 1; tick(); }, 30);
+})();
+</script>
+
+</body>
+</html>
