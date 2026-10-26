@@ -1,14 +1,15 @@
 # Sliced Cat
 
-An interactive Three.js sculpture: a sitting cat cut into 44 parallel plates. Orbit it, and run the cursor across the plates to play them like an instrument.
+An interactive Three.js sculpture: a sitting cat cut into 75 parallel plates. Orbit it, and run the cursor across the plates to play them like an instrument.
 
 ## Features
 
 - Plates are generated in the browser from a signed-distance model of the cat, using marching squares, so the plate count can change live (24–96)
 - Each plate plays a pentatonic note with a synthesized struck-metal tone, panned by position, through a short reverb (Web Audio, no samples)
 - Hovering wakes a translucent teal / plum / coral glass color that fades out after the cursor leaves
-- Resting finish: polished steel or clear glass
-- Hover motion: Tilt, Ripple or Slide; Explode spreads the plates apart
+- Resting finish: clear glass (default) or polished steel
+- Hover motion: Tilt (default), Ripple or Slide
+- Sound is on by default and starts on the first click or tap, since browsers block audio until then; a volume slider sits under the Sound button; Explode spreads the plates apart
 
 ## Run locally
 
